@@ -2,103 +2,45 @@ package io.github.chsbuffer.revancedxposed.spotify.misc.ads
 
 import android.util.Log
 import de.robv.android.xposed.XC_MethodHook
-import de.robv.android.xposed.XC_MethodReplacement
 import de.robv.android.xposed.XposedBridge
 import io.github.chsbuffer.revancedxposed.spotify.SpotifyHook
 import java.net.InetAddress
-import java.net.UnknownHostException
+import java.io.IOException
 
 private const val TAG = "AD_DIAG"
-
-/**
- * ══════════════════════════════════════════════════════════════
- * DNS DOMAIN DISCOVERY MODE
- * ══════════════════════════════════════════════════════════════
- *
- * Set this to `true` to log ALL domains that Spotify tries to resolve.
- * Use this to discover new ad domains when Spotify changes them.
- *
- * HOW TO USE:
- *   1. Set DNS_DISCOVERY_MODE = true (below)
- *   2. Rebuild: ./gradlew :app:assembleUniversalRelease
- *   3. Install the new APK on your device
- *   4. Open Spotify and play music for a few minutes (let ads appear)
- *   5. Run this command on your PC to capture the domain log:
- *
- *      adb logcat -s AD_DIAG | grep "DNS_LOG"
- *
- *   6. Review the output — you'll see every domain Spotify contacts:
- *
- *      DNS_LOG: ✓ ALLOWED  spclient.wg.spotify.com
- *      DNS_LOG: ✓ ALLOWED  api-partner.spotify.com
- *      DNS_LOG: ★ BLOCKED  ads.spotify.com → 127.0.0.1
- *      DNS_LOG: ✓ ALLOWED  newdomain.spotify.com        ← is this an ad domain?
- *
- *   7. Look for domains with keywords like: ad, track, analytics,
- *      sponsored, log, metric, telemetry, event, pixel, beacon
- *   8. Add suspicious domains to the `blockedDomains` set below
- *   9. Set DNS_DISCOVERY_MODE = false and rebuild for normal use
- *
- * TIP: To save the log to a file for easier review:
- *      adb logcat -s AD_DIAG | grep "DNS_LOG" > ~/spotify_domains.txt
- *
- * WARNING: Keep this OFF for daily use — it generates a LOT of log output.
- * ══════════════════════════════════════════════════════════════
- */
 private const val DNS_DISCOVERY_MODE = false
 
-/**
- * Ad suppression — Phase 21: DNS-level + Path-level ad blocking.
- *
- * Dual-layer network ad blocking:
- *
- * Layer 1 (DNS): Blocks ad-only domains at DNS resolution level by
- * sinkholing them to 127.0.0.1. Same technique as AdGuard DNS / Pi-hole.
- *
- * Layer 2B (Path): Blocks ad-related URL paths on shared domains like
- * spclient.spotify.com that also carry legitimate traffic (playlists,
- * profiles, playback). DNS can't block these — we need URL-level
- * inspection via OkHttp interceptor hooks.
- *
- * The domain list was verified working via AdGuard DNS — zero ads,
- * zero disruption, music plays perfectly.
- */
 @Suppress("UNCHECKED_CAST")
 fun SpotifyHook.InterceptAds() {
-    Log.i(TAG, "═══ InterceptAds v21 (DNS + Path block) starting ═══")
+    Log.i(TAG, "═══ InterceptAds (Stable Pure-Network Block) starting ═══")
     var hooks = 0
 
     // ══════════════════════════════════════════════════════════════
-    // Blocked ad-serving domains
-    // Verified working via AdGuard DNS — zero ads, zero disruption.
+    // Blocked ad-serving domains (spclient and dealer kept unblocked)
+    // Updated with verified 2026 Spotify ad-serving CDNs
     // ══════════════════════════════════════════════════════════════
     val blockedDomains = setOf(
         // ── Spotify ad infrastructure ────────────────────────────
         "ads.spotify.com",
+        "ads-fa.spotify.com",
+        "audio-ads.spotify.com",
         "audio-ak-spotify-com.akamaized.net",
         "audio2.spotify.com",
+        "audio-ec.spotify.com",
+        "heads-ec.spotify.com",
         "adstats.spotify.com",
         "adeventtracker.spotify.com",
         "sponsored-recommendations.spotify.com",
         "desktop.spotify.com",
         "weblb-wg.gslb.spotify.com",
         "redirect.spotify.net",
-        "spclient.wg.spotify.com",
-        
         
         // ── Spotify analytics & telemetry ────────────────────────
         "analytics.spotify.com",
+        "metrics.spotify.com",
         "tracking.spotify.com",
         "log.spotify.com",
         "crashdump.spotify.com",
-
-        // ── Dealer domains (real-time WebSocket messaging) ───────
-        // These deliver server-side commands including forced
-        // logout signals. Blocking them prevents the server from
-        // pushing session-kill commands to the client.
-        // Using base domain — subdomain matching catches ALL
-        // regional variants (gew4-, guc3-, gew1-, gae2-, etc.)
-        "dealer.g2.spotify.com",
 
         // ── Third-party tracking & ads ───────────────────────────
         "firebaseinstallations.googleapis.com",
@@ -106,35 +48,19 @@ fun SpotifyHook.InterceptAds() {
         "cdn.branch.io",
         "api2.branch.io",
         "pagead2.googlesyndication.com",
+        "pubads.g.doubleclick.net",
+        "securepubads.g.doubleclick.net",
+        "googleads.g.doubleclick.net",
+        "tpc.googlesyndication.com",
         "bs.serving-sys.com",
         "bounceexchange.com",
         "sb.scorecardresearch.com",
         "b.scorecardresearch.com",
         "segment-data-us-east.zqtk.net",
-        "live.ravelin.click",
-
-        // Other domains
-
-        "gew1-dealer.g2.spotify.com",
-        "gew1-dealer-ssl.spotify.com",
-        //"gew1-spclient.spotify.com",
-        //"edge-web-gew1.dual-gslb.spotify.com",
-        
-
-        
-
+        "live.ravelin.click"
     )
 
-
-    // ══════════════════════════════════════════════════════════════
     // Blocked URL path prefixes (for shared domains like spclient)
-    //
-    // These paths serve ads on domains that ALSO carry legitimate
-    // traffic (playlists, profiles, playback), so we can't block
-    // the entire domain at DNS level — we block only the ad paths.
-    //
-    // Discovered via mitmproxy traffic capture.
-    // ══════════════════════════════════════════════════════════════
     val blockedPathPrefixes = setOf(
         "/ads/",
         "/ad-logic/",
@@ -145,8 +71,6 @@ fun SpotifyHook.InterceptAds() {
         "/ads?"
     )
 
-    // Domains that use mixed ad + legitimate traffic
-    // (regional spclient variants like gew4-spclient, gae2-spclient, etc.)
     fun isSpclientDomain(host: String?): Boolean {
         if (host == null) return false
         val h = host.lowercase()
@@ -159,12 +83,9 @@ fun SpotifyHook.InterceptAds() {
         return blockedPathPrefixes.any { prefix -> p.startsWith(prefix) }
     }
 
-    // Loopback address for sinkholing
     val loopback = InetAddress.getByAddress("blocked.local", byteArrayOf(127, 0, 0, 1))
     val loopbackArray = arrayOf(loopback)
 
-    // Helper: check if a hostname matches any blocked domain
-    // Supports both exact match and subdomain match (e.g. "foo.ads.spotify.com")
     fun isBlocked(host: String?): Boolean {
         if (host == null) return false
         val h = host.lowercase()
@@ -176,12 +97,6 @@ fun SpotifyHook.InterceptAds() {
     // ══════════════════════════════════════════════════════════════
     // LAYER 1: Hook InetAddress DNS resolution
     // ══════════════════════════════════════════════════════════════
-    //
-    // This is the fundamental network hook — ALL Java network calls
-    // (OkHttp, HttpURLConnection, WebView, etc.) ultimately go through
-    // InetAddress for DNS resolution.
-
-    // ── 1A: InetAddress.getAllByName(String) → InetAddress[] ──────
     try {
         val method = InetAddress::class.java.getMethod("getAllByName", String::class.java)
         XposedBridge.hookMethod(method, object : XC_MethodHook() {
@@ -190,11 +105,6 @@ fun SpotifyHook.InterceptAds() {
                 if (isBlocked(host)) {
                     Log.i(TAG, "★ DNS: BLOCKED getAllByName($host) → 127.0.0.1")
                     param.result = loopbackArray
-                    if (DNS_DISCOVERY_MODE) {
-                        Log.i(TAG, "DNS_LOG: ★ BLOCKED  $host → 127.0.0.1")
-                    }
-                } else if (DNS_DISCOVERY_MODE) {
-                    Log.i(TAG, "DNS_LOG: ✓ ALLOWED  $host")
                 }
             }
         })
@@ -202,7 +112,6 @@ fun SpotifyHook.InterceptAds() {
         hooks++
     } catch (e: Throwable) { Log.w(TAG, "✗ 1A: getAllByName: ${e.message}") }
 
-    // ── 1B: InetAddress.getByName(String) → InetAddress ──────────
     try {
         val method = InetAddress::class.java.getMethod("getByName", String::class.java)
         XposedBridge.hookMethod(method, object : XC_MethodHook() {
@@ -211,11 +120,6 @@ fun SpotifyHook.InterceptAds() {
                 if (isBlocked(host)) {
                     Log.i(TAG, "★ DNS: BLOCKED getByName($host) → 127.0.0.1")
                     param.result = loopback
-                    if (DNS_DISCOVERY_MODE) {
-                        Log.i(TAG, "DNS_LOG: ★ BLOCKED  $host → 127.0.0.1")
-                    }
-                } else if (DNS_DISCOVERY_MODE) {
-                    Log.i(TAG, "DNS_LOG: ✓ ALLOWED  $host")
                 }
             }
         })
@@ -224,13 +128,8 @@ fun SpotifyHook.InterceptAds() {
     } catch (e: Throwable) { Log.w(TAG, "✗ 1B: getByName: ${e.message}") }
 
     // ══════════════════════════════════════════════════════════════
-    // LAYER 2: Hook URL/connection layer (defense-in-depth)
+    // LAYER 2: Connection-level blocks
     // ══════════════════════════════════════════════════════════════
-    //
-    // Some libraries may cache DNS or use custom resolvers.
-    // We also hook java.net.URL.openConnection() as a fallback.
-
-    // ── 2A: java.net.URL.openConnection() ────────────────────────
     try {
         val urlClass = java.net.URL::class.java
         val openConn = urlClass.getMethod("openConnection")
@@ -239,7 +138,7 @@ fun SpotifyHook.InterceptAds() {
                 val url = param.thisObject as? java.net.URL ?: return
                 if (isBlocked(url.host)) {
                     Log.i(TAG, "★ URL: BLOCKED openConnection(${url.host}${url.path})")
-                    param.throwable = java.io.IOException("Blocked: ${url.host}")
+                    param.throwable = IOException("Blocked: ${url.host}")
                 }
             }
         })
@@ -247,14 +146,7 @@ fun SpotifyHook.InterceptAds() {
         hooks++
     } catch (e: Throwable) { Log.w(TAG, "✗ 2A: URL.openConnection: ${e.message}") }
 
-    // ── 2B: Path-level blocking on spclient domains ───────────────
-    //
-    // spclient domains (gew4-spclient.spotify.com, etc.) serve BOTH
-    // ad traffic and legitimate traffic on the same domain.
-    // DNS can't block these — we intercept at the URL/path level.
-    //
-    // Hooks OkHttp's RealCall to intercept requests before they're
-    // sent, returning an empty 204 response for ad paths.
+    // Path-level blocking on spclient domains (returning empty 204 No Content for ad paths)
     try {
         val interceptorClass = Class.forName("okhttp3.Interceptor\$Chain", false, classLoader)
         val requestClass = Class.forName("okhttp3.Request", false, classLoader)
@@ -265,12 +157,10 @@ fun SpotifyHook.InterceptAds() {
         val mediaTypeClass = Class.forName("okhttp3.MediaType", false, classLoader)
         val httpUrlClass = Class.forName("okhttp3.HttpUrl", false, classLoader)
 
-        // Get the HttpUrl accessors
         val urlMethod = requestClass.getMethod("url")
         val hostMethod = httpUrlClass.getMethod("host")
         val encodedPathMethod = httpUrlClass.getMethod("encodedPath")
 
-        // Get Response.Builder methods
         val newBuilder = responseBuilderClass.getConstructor()
         val builderRequest = responseBuilderClass.getMethod("request", requestClass)
         val builderProtocol = responseBuilderClass.getMethod("protocol", protocolClass)
@@ -279,15 +169,11 @@ fun SpotifyHook.InterceptAds() {
         val builderBody = responseBuilderClass.getMethod("body", responseBodyClass)
         val builderBuild = responseBuilderClass.getMethod("build")
 
-        // Get Protocol.HTTP_1_1
         val http11 = protocolClass.getField("HTTP_1_1").get(null)
-
-        // Get ResponseBody.create(MediaType, String)
         val parseMediaType = mediaTypeClass.getMethod("parse", String::class.java)
         val emptyMediaType = parseMediaType.invoke(null, "text/plain")
         val createBody = responseBodyClass.getMethod("create", mediaTypeClass, String::class.java)
 
-        // Hook the proceed(Request) method on Interceptor.Chain
         val proceedMethod = interceptorClass.getMethod("proceed", requestClass)
         XposedBridge.hookMethod(proceedMethod, object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
@@ -299,11 +185,6 @@ fun SpotifyHook.InterceptAds() {
 
                     if (isSpclientDomain(host) && isBlockedPath(path)) {
                         Log.i(TAG, "★ PATH: BLOCKED $host$path")
-                        if (DNS_DISCOVERY_MODE) {
-                            Log.i(TAG, "DNS_LOG: ★ PATH_BLOCKED  $host$path")
-                        }
-
-                        // Build an empty 204 No Content response
                         val emptyBody = createBody.invoke(null, emptyMediaType, "")
                         val builder = newBuilder.newInstance()
                         builderRequest.invoke(builder, request)
@@ -312,26 +193,17 @@ fun SpotifyHook.InterceptAds() {
                         builderMessage.invoke(builder, "Blocked by RVX")
                         builderBody.invoke(builder, emptyBody)
                         param.result = builderBuild.invoke(builder)
-                    } else if (DNS_DISCOVERY_MODE && isSpclientDomain(host)) {
-                        Log.i(TAG, "DNS_LOG: ✓ PATH_ALLOWED  $host$path")
                     }
-                } catch (_: Throwable) { /* don't crash on path check failures */ }
+                } catch (_: Throwable) {}
             }
         })
         Log.i(TAG, "✓ 2B: OkHttp path-level blocking hooked")
         hooks++
     } catch (e: Throwable) { Log.w(TAG, "✗ 2B: OkHttp path blocking: ${e.message}") }
 
-    // ══════════════════════════════════════════════════════════════
-    // LAYER 3: OkHttp DNS interceptor (Spotify uses OkHttp internally)
-    // ══════════════════════════════════════════════════════════════
-    //
-    // Hook OkHttp's Dns interface to block resolution of ad domains.
-    // OkHttp can bypass InetAddress if a custom Dns is provided.
-
+    // OkHttp DNS Interceptor
     try {
         val dnsInterface = Class.forName("okhttp3.Dns", false, classLoader)
-        // Hook the Dns.SYSTEM field's lookup method
         val systemDnsField = dnsInterface.getField("SYSTEM")
         val systemDns = systemDnsField.get(null) ?: throw Exception("SYSTEM dns is null")
         val lookupMethod = systemDns.javaClass.getMethod("lookup", String::class.java)
@@ -349,154 +221,45 @@ fun SpotifyHook.InterceptAds() {
     } catch (e: Throwable) { Log.w(TAG, "✗ 3: OkHttp Dns: ${e.message}") }
 
     // ══════════════════════════════════════════════════════════════
-    // LAYER 4: Visual ad suppression (retained for defense-in-depth)
+    // LAYER 3: Visual Ad Suppression (Completely Safe Activity Finishes)
     // ══════════════════════════════════════════════════════════════
-
-    val dk = getDexKit()
-    dk.withBridge { bridge ->
-
-        // ── 4A: DisplayAdActivity.onCreate → finish() ────────────────
-        try {
-            val displayAdClass = Class.forName(
-                "com.spotify.adsdisplay.display.DisplayAdActivity", false, classLoader
-            )
-            val onCreateMethod = displayAdClass.getDeclaredMethod(
-                "onCreate", android.os.Bundle::class.java
-            )
-            onCreateMethod.isAccessible = true
-            XposedBridge.hookMethod(onCreateMethod, object : XC_MethodHook() {
-                override fun afterHookedMethod(param: MethodHookParam) {
-                    try {
-                        val activity = param.thisObject as android.app.Activity
-                        Log.i(TAG, "★ 4A: DisplayAdActivity.finish()")
-                        activity.finish()
-                    } catch (e: Throwable) {
-                        Log.w(TAG, "4A: ${e.message}")
-                    }
-                }
-            })
-            Log.i(TAG, "✓ 4A: DisplayAdActivity → finish()")
-            hooks++
-        } catch (e: Throwable) { Log.w(TAG, "✗ 4A: ${e.message}") }
-
-        // ── 4B: InAppBrowserActivity.onCreate → finish() ─────────────
-        try {
-            val browserClass = Class.forName(
-                "com.spotify.adsdisplay.browser.inapp.InAppBrowserActivity", false, classLoader
-            )
-            val onCreateMethod = browserClass.getDeclaredMethod(
-                "onCreate", android.os.Bundle::class.java
-            )
-            onCreateMethod.isAccessible = true
-            XposedBridge.hookMethod(onCreateMethod, object : XC_MethodHook() {
-                override fun afterHookedMethod(param: MethodHookParam) {
-                    try {
-                        val activity = param.thisObject as android.app.Activity
-                        Log.i(TAG, "★ 4B: InAppBrowserActivity.finish()")
-                        activity.finish()
-                    } catch (e: Throwable) {
-                        Log.w(TAG, "4B: ${e.message}")
-                    }
-                }
-            })
-            Log.i(TAG, "✓ 4B: InAppBrowserActivity → finish()")
-            hooks++
-        } catch (e: Throwable) { Log.w(TAG, "✗ 4B: ${e.message}") }
-
-        // ── 4C: PlayerState.Builder.adBreakContext → skip ────────────
-        try {
-            val methods = bridge.findMethod {
-                matcher {
-                    declaredClass("com.spotify.player.model.AutoValue_PlayerState\$Builder")
-                    name("adBreakContext")
-                    paramCount(1)
-                }
-            }
-            for (i in 0 until methods.size) {
-                val member = methods[i].getMethodInstance(classLoader)
-                XposedBridge.hookMethod(member, object : XC_MethodHook() {
-                    override fun beforeHookedMethod(param: MethodHookParam) {
-                        Log.i(TAG, "★ 4C: PlayerState.adBreakContext() → SKIPPED")
-                        param.result = param.thisObject
-                    }
-                })
-                Log.i(TAG, "✓ 4C: PlayerState.Builder.adBreakContext → skip")
-                hooks++
-            }
-        } catch (e: Throwable) { Log.w(TAG, "✗ 4C: adBreakContext: ${e.message}") }
-
-        // ── 4D: deserializeAdBreakContext → null ─────────────────────
-        try {
-            val methods = bridge.findMethod {
-                matcher {
-                    declaredClass("com.spotify.player.model.PlayerState_Deserializer")
-                    name("deserializeAdBreakContext")
-                }
-            }
-            for (i in 0 until methods.size) {
-                val member = methods[i].getMethodInstance(classLoader)
-                XposedBridge.hookMethod(member, XC_MethodReplacement.returnConstant(null))
-                Log.i(TAG, "✓ 4D: deserializeAdBreakContext → null")
-                hooks++
-            }
-        } catch (e: Throwable) { Log.w(TAG, "✗ 4D: ${e.message}") }
-
-        // ── 4E: Builder.track(ContextTrack) → filter spotify:ad URIs ─
-        val builderTargets = listOf(
-            "com.spotify.player.model.AutoValue_PlayerState\$Builder",
-            "com.spotify.player.model.AutoValue_PlayerQueue\$Builder"
+    try {
+        val displayAdClass = Class.forName(
+            "com.spotify.adsdisplay.display.DisplayAdActivity", false, classLoader
         )
-        for (className in builderTargets) {
-            try {
-                val methods = bridge.findMethod {
-                    matcher {
-                        declaredClass(className)
-                        name("track")
-                        addParamType("com.spotify.player.model.ContextTrack")
-                    }
-                }
-                for (i in 0 until methods.size) {
-                    val member = methods[i].getMethodInstance(classLoader)
-                    XposedBridge.hookMethod(member, object : XC_MethodHook() {
-                        override fun beforeHookedMethod(param: MethodHookParam) {
-                            val arg = param.args?.firstOrNull() ?: return
-                            val uri = getTrackUri(arg)
-                            if (uri != null && uri.startsWith("spotify:ad")) {
-                                Log.i(TAG, "★ 4E: FILTERED ad track [$uri]")
-                                param.result = param.thisObject
-                            }
-                        }
-                    })
-                    hooks++
-                }
-                Log.i(TAG, "✓ 4E: track filter on $className")
-            } catch (e: Throwable) { Log.w(TAG, "✗ 4E $className: ${e.message}") }
-        }
-    }
-
-    Log.i(TAG, "═══ InterceptAds v21 complete: $hooks hooks ═══")
-}
-
-private fun getTrackUri(obj: Any?): String? {
-    if (obj == null) return null
-    return try {
-        val uriMethod = obj.javaClass.methods.firstOrNull {
-            (it.name == "uri" || it.name == "getUri") && it.parameterCount == 0
-        }
-        uriMethod?.let { it.isAccessible = true; it.invoke(obj)?.toString() }
-            ?: run {
-                val uriField = obj.javaClass.allFields().firstOrNull {
-                    it.name.lowercase().contains("uri") && it.type == String::class.java
-                }
-                uriField?.let { it.isAccessible = true; it.get(obj)?.toString() }
+        val onCreateMethod = displayAdClass.getDeclaredMethod("onCreate", android.os.Bundle::class.java)
+        onCreateMethod.isAccessible = true
+        XposedBridge.hookMethod(onCreateMethod, object : XC_MethodHook() {
+            override fun afterHookedMethod(param: MethodHookParam) {
+                try {
+                    val activity = param.thisObject as android.app.Activity
+                    Log.i(TAG, "★ 3A: DisplayAdActivity.finish()")
+                    activity.finish()
+                } catch (e: Throwable) { Log.w(TAG, "3A: ${e.message}") }
             }
-    } catch (_: Throwable) { null }
-}
+        })
+        Log.i(TAG, "✓ 3A: DisplayAdActivity → finish()")
+        hooks++
+    } catch (e: Throwable) { Log.w(TAG, "✗ 3A: ${e.message}") }
 
-private fun Class<*>.allFields(): Sequence<java.lang.reflect.Field> = sequence {
-    var c: Class<*>? = this@allFields
-    while (c != null && c != Any::class.java) {
-        yieldAll(c.declaredFields.asSequence())
-        c = c.superclass
-    }
+    try {
+        val browserClass = Class.forName(
+            "com.spotify.adsdisplay.browser.inapp.InAppBrowserActivity", false, classLoader
+        )
+        val onCreateMethod = browserClass.getDeclaredMethod("onCreate", android.os.Bundle::class.java)
+        onCreateMethod.isAccessible = true
+        XposedBridge.hookMethod(onCreateMethod, object : XC_MethodHook() {
+            override fun afterHookedMethod(param: MethodHookParam) {
+                try {
+                    val activity = param.thisObject as android.app.Activity
+                    Log.i(TAG, "★ 3B: InAppBrowserActivity.finish()")
+                    activity.finish()
+                } catch (e: Throwable) { Log.w(TAG, "3B: ${e.message}") }
+            }
+        })
+        Log.i(TAG, "✓ 3B: InAppBrowserActivity → finish()")
+        hooks++
+    } catch (e: Throwable) { Log.w(TAG, "✗ 3B: ${e.message}") }
+
+    Log.i(TAG, "═══ InterceptAds complete: $hooks hooks ═══")
 }

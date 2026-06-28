@@ -2,13 +2,14 @@ name: Android CI
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
     tags-ignore:
-      - 'v*'          # tagged releases are handled by release.yml
+      - "v*" # tagged releases are handled by release.yml
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
   schedule:
-    - cron: '0 0 * * *'
+    - cron: "0 0 * * *"
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -23,13 +24,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: true
-          fetch-depth: 0        # needed for git log date in versionName
+          fetch-depth: 0 # needed for git log date in versionName
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
-          distribution: 'temurin'
+          java-version: "17"
+          distribution: "temurin"
           cache: gradle
 
       - name: Grant execute permission for gradlew
@@ -52,21 +53,21 @@ jobs:
             app/build/outputs/mapping/universalRelease/mapping.txt
 
       # Only publish an autobuild release for pushes to main (not PRs, not forks)
-      - name: Publish autobuild release
-        if: >
-          github.event_name != 'pull_request' &&
-          github.repository == github.event.repository.full_name
-        run: |
-          GIT_DESCRIBE=$(git rev-parse --short HEAD)
-          GIT_COMMIT_DATE=$(git log -1 --format=%cd --date=format:%y%m%d)
-          APK_NAME="ReVancedXposedSpotify-${GIT_COMMIT_DATE}.apk"
-          cp app/build/outputs/apk/universal/release/app-universal-release.apk "${APK_NAME}"
-          gh release delete autobuild --yes || true
-          gh release create autobuild "${APK_NAME}" \
-            --prerelease \
-            --title "Nightly build ${GIT_COMMIT_DATE}" \
-            --notes "Automated nightly build from commit \`${GIT_DESCRIBE}\`.
+      #- name: Publish autobuild release
+      #  if: >
+      #    github.event_name != 'pull_request' &&
+      #    github.repository == github.event.repository.full_name
+      #  run: |
+      #    GIT_DESCRIBE=$(git rev-parse --short HEAD)
+      #    GIT_COMMIT_DATE=$(git log -1 --format=%cd --date=format:%y%m%d)
+      #    APK_NAME="ReVancedXposedSpotify-${GIT_COMMIT_DATE}.apk"
+      #    cp app/build/outputs/apk/universal/release/app-universal-release.apk "${APK_NAME}"
+      #    gh release delete autobuild --yes || true
+      #    gh release create autobuild "${APK_NAME}" \
+      #      --prerelease \
+      #      --title "Nightly build ${GIT_COMMIT_DATE}" \
+      #      --notes "Automated nightly build from commit \`${GIT_DESCRIBE}\`.
 
-          > The package name and signature of this build change daily. You do **not** need to reinstall every day."
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      #    > The package name and signature of this build change daily. You do **not** need to reinstall every day."
+      #  env:
+      #    GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

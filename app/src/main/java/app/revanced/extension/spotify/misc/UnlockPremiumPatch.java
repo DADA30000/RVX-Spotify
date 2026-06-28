@@ -2,6 +2,7 @@
  * Custom changes:
  * Wipe stubbed types: REMOVED_HOME_SECTIONS, createOverriddenAttributesMap, removeHomeSections
  * Non-destructive attribute override: clones AccountAttribute objects instead of mutating in-place
+ * Added "ads" -> FALSE back to premium overrides list
  * */
 package app.revanced.extension.spotify.misc;
 
@@ -50,7 +51,8 @@ public final class UnlockPremiumPatch {
     }
 
     private static final List<OverrideAttribute> PREMIUM_OVERRIDES = List.of(
-            
+            // Disable ads natively (Invisible to server via non-destructive cloning)
+            new OverrideAttribute("ads", FALSE),
 
             // Works along on-demand, allows playing any song without restriction.
             new OverrideAttribute("player-license", "on-demand"),
