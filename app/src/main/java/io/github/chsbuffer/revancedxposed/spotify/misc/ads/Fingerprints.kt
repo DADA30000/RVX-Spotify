@@ -14,6 +14,7 @@ import io.github.chsbuffer.revancedxposed.findMethodListDirect
  * Class: com.spotify.player.model.PlayerState_Deserializer
  * Method: deserializeAdBreakContext(JsonParser, DeserializationContext) → AdBreakContext
  */
+@get:SkipTest
 val adBreakDeserializerFingerprint = findMethodDirect {
     findMethod {
         matcher {

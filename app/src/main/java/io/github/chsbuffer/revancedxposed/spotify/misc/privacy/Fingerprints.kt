@@ -36,6 +36,17 @@ val formatAndroidShareSheetUrlFingerprint = findMethodDirect {
             // `(PlayerState, String) -> String` usingNumbers(1, 10); usingStrings("")
             !it.usingStrings.contains("")
         }
+    }.recoverCatching {
+        findMethod {
+            matcher {
+                returnType("java.lang.String")
+                usingStrings("\n")
+                modifiers = Modifier.PUBLIC or Modifier.STATIC
+                paramTypes(null, "java.lang.String")
+            }
+        }.single {
+            it.paramTypes[0].name != "java.lang.String"
+        }
     }.getOrElse {
         findMethod {
             matcher {

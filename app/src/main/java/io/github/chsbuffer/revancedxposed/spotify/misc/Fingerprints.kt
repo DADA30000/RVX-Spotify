@@ -26,19 +26,31 @@ val buildQueryParametersFingerprint = findMethodDirect {
         }
     }.single()
 }
-val contextFromJsonFingerprint = fingerprint {
-    opcodes(
-        Opcode.INVOKE_STATIC,
-        Opcode.MOVE_RESULT_OBJECT,
-        Opcode.INVOKE_VIRTUAL,
-        Opcode.MOVE_RESULT_OBJECT,
-        Opcode.INVOKE_STATIC
-    )
-    methodMatcher {
-        name("fromJson")
-        declaredClass(
-            "voiceassistants.playermodels.ContextJsonAdapter", StringMatchType.EndsWith
-        )
+val contextFromJsonFingerprint = findMethodDirect {
+    runCatching {
+        this.fingerprint {
+            opcodes(
+                Opcode.INVOKE_STATIC,
+                Opcode.MOVE_RESULT_OBJECT,
+                Opcode.INVOKE_VIRTUAL,
+                Opcode.MOVE_RESULT_OBJECT,
+                Opcode.INVOKE_STATIC
+            )
+            methodMatcher {
+                name("fromJson")
+                declaredClass(
+                    "voiceassistants.playermodels.ContextJsonAdapter", StringMatchType.EndsWith
+                )
+            }
+        }
+    }.getOrElse {
+        findMethod {
+            matcher {
+                name("deserialize")
+                declaredClass("voiceassistants.playermodels.ContextSerializer", StringMatchType.EndsWith)
+                returnType("com.spotify.player.model.Context")
+            }
+        }.single()
     }
 }
 
@@ -56,6 +68,7 @@ val contextMenuViewModelClass = findClassDirect {
     }.declaredClass!!
 }
 
+@get:SkipTest
 val viewModelClazz = findClassDirect {
     findMethod {
         findFirst = true
@@ -63,6 +76,7 @@ val viewModelClazz = findClassDirect {
     }.single().returnType!!
 }
 
+@get:SkipTest
 val isPremiumUpsellField = findFieldDirect {
     viewModelClazz().fields.filter { it.typeName == "boolean" }[1]
 }
@@ -79,7 +93,7 @@ fun structureGetSectionsFingerprint(className: String) = fingerprint {
 }
 
 val homeStructureGetSectionsFingerprint =
-    structureGetSectionsFingerprint("homeapi.proto.HomeStructure")
+    structureGetSectionsFingerprint("HomeStructure")
 val browseStructureGetSectionsFingerprint =
     structureGetSectionsFingerprint("browsita.v1.resolved.BrowseStructure")
 

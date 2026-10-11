@@ -127,6 +127,13 @@ public final class UnlockPremiumPatch {
                 // Clone the attribute object so the original protobuf data stays untouched
                 // for server serialization, preventing server-side state mismatch detection.
                 Object clonedAttribute = shallowCloneObject(attribute);
+                if (override.overrideValue instanceof Boolean) {
+                    XposedHelpers.setIntField(clonedAttribute, "valueCase_", 2);
+                } else if (override.overrideValue instanceof String) {
+                    XposedHelpers.setIntField(clonedAttribute, "valueCase_", 4);
+                } else if (override.overrideValue instanceof Long || override.overrideValue instanceof Integer) {
+                    XposedHelpers.setIntField(clonedAttribute, "valueCase_", 3);
+                }
                 XposedHelpers.setObjectField(clonedAttribute, "value_", override.overrideValue);
                 result.put(override.key, clonedAttribute);
             }
