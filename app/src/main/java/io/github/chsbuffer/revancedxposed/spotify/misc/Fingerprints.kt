@@ -16,6 +16,15 @@ val productStateProtoFingerprint = fingerprint {
     classMatcher { descriptor = "Lcom/spotify/remoteconfig/internal/ProductStateProto;" }
 }
 
+val productStateProtoParserFingerprint = findMethodDirect {
+    findMethod {
+        matcher {
+            declaredClass("com.spotify.remoteconfig.internal.ProductStateProto")
+            name("q")
+        }
+    }.single()
+}
+
 val attributesMapField =
     findFieldDirect { productStateProtoFingerprint().usingFields.single().field }
 

@@ -22,10 +22,36 @@ fun SpotifyHook.UnlockPremium() {
         ::productStateProtoFingerprint.hookMethod {
             after { param ->
                 val result = param.result as? Map<String, *> ?: return@after
-                param.result = UnlockPremiumPatch.createOverriddenAttributesMap(result)
+                val overridden = UnlockPremiumPatch.createOverriddenAttributesMap(result)
+                param.result = overridden
+                runCatching {
+                    val proto = param.thisObject ?: return@runCatching
+                    val field = ::attributesMapField.field
+                    val lie0Class = field.type
+                    val newLie0 = lie0Class.getConstructor().newInstance() as MutableMap<Any?, Any?>
+                    newLie0.putAll(overridden)
+                    field.set(proto, newLie0)
+                }
             }
         }
     }.onFailure { Logger.printException({ "Critical productStateProto hook failed" }, it) }
+
+    runCatching {
+        ::productStateProtoParserFingerprint.hookMethod {
+            after { param ->
+                val proto = param.result ?: return@after
+                runCatching {
+                    val field = ::attributesMapField.field
+                    val map = field.get(proto) as? Map<String, *> ?: return@runCatching
+                    val overridden = UnlockPremiumPatch.createOverriddenAttributesMap(map)
+                    val lie0Class = field.type
+                    val newLie0 = lie0Class.getConstructor().newInstance() as MutableMap<Any?, Any?>
+                    newLie0.putAll(overridden)
+                    field.set(proto, newLie0)
+                }
+            }
+        }
+    }.onFailure { Logger.printException({ "ProductStateProto parser hook failed" }, it) }
 
     // 2. Query parameters for artist page
     runCatching {

@@ -51,29 +51,42 @@ public final class UnlockPremiumPatch {
     }
 
     private static final List<OverrideAttribute> PREMIUM_OVERRIDES = List.of(
-            // Disable ads natively (Invisible to server via non-destructive cloning)
+            // Disable ads natively
             new OverrideAttribute("ads", FALSE),
 
             // Works along on-demand, allows playing any song without restriction.
-            new OverrideAttribute("player-license", "on-demand"),
+            new OverrideAttribute("player-license", "premium"),
+            new OverrideAttribute("player-license-v2", "premium"),
+
             // Disables shuffle being initially enabled when first playing a playlist.
             new OverrideAttribute("shuffle", FALSE),
+
             // Allows playing any song on-demand, without a shuffled order.
             new OverrideAttribute("on-demand", TRUE),
+
             // Make sure playing songs is not disabled remotely and playlists show up.
             new OverrideAttribute("streaming", TRUE),
+
             // Allows adding songs to queue and removes the smart shuffle mode restriction,
             // allowing to pick any of the other modes. Flag is not present in legacy app target.
             new OverrideAttribute("pick-and-shuffle", FALSE),
+
             // Disables shuffle-mode streaming-rule, which forces songs to be played shuffled
             // and breaks the player when other patches are applied.
             new OverrideAttribute("streaming-rules", ""),
+
             // Enables premium UI in settings and removes the premium button in the nav-bar.
             new OverrideAttribute("nft-disabled", "1"),
+
+            // Enable Spotify Connect and disable other premium related UI, like buying premium.
+            // It also removes the Premium tab in the nav-bar.
+            new OverrideAttribute("type", "premium"),
+
             // Enable Spotify Car Thing hardware device.
             // Device is discontinued and no longer works with the latest releases,
             // but it might still work with older app targets.
             new OverrideAttribute("can_use_superbird", TRUE, false),
+
             // Removes the premium button in the nav-bar for tablet users.
             new OverrideAttribute("tablet-free", FALSE, false)
     );
@@ -95,6 +108,17 @@ public final class UnlockPremiumPatch {
             com.spotify.browsita.v1.resolved.Section.BRAND_ADS_FIELD_NUMBER
     );
 
+    private static void setAttributeValue(Object attribute, Object value) {
+        if (value instanceof Boolean) {
+            XposedHelpers.setIntField(attribute, "valueCase_", 2);
+        } else if (value instanceof String) {
+            XposedHelpers.setIntField(attribute, "valueCase_", 4);
+        } else if (value instanceof Long || value instanceof Integer) {
+            XposedHelpers.setIntField(attribute, "valueCase_", 3);
+        }
+        XposedHelpers.setObjectField(attribute, "value_", value);
+    }
+
     /**
      * Injection point. Creates a non-destructive copy of the attributes map with overridden values.
      * Original AccountAttribute objects are NOT modified, preventing server-side detection
@@ -104,12 +128,24 @@ public final class UnlockPremiumPatch {
     public static Map<String, ?> createOverriddenAttributesMap(Map<String, ?> originalMap) {
         try {
             Map<String, Object> result = new LinkedHashMap<>((Map<String, Object>) originalMap);
+            Object sample = null;
+            for (Object obj : originalMap.values()) {
+                if (obj != null) {
+                    sample = obj;
+                    break;
+                }
+            }
 
             for (OverrideAttribute override : PREMIUM_OVERRIDES) {
                 Object attribute = result.get(override.key);
 
                 if (attribute == null) {
-                    if (override.isExpected) {
+                    if (sample != null) {
+                        Object newAttr = shallowCloneObject(sample);
+                        setAttributeValue(newAttr, override.overrideValue);
+                        result.put(override.key, newAttr);
+                        Logger.printInfo(() -> "Inserted missing account attribute " + override.key + " = " + override.overrideValue);
+                    } else if (override.isExpected) {
                         Logger.printException(() -> "Attribute " + override.key + " expected but not found");
                     }
                     continue;
@@ -127,14 +163,7 @@ public final class UnlockPremiumPatch {
                 // Clone the attribute object so the original protobuf data stays untouched
                 // for server serialization, preventing server-side state mismatch detection.
                 Object clonedAttribute = shallowCloneObject(attribute);
-                if (override.overrideValue instanceof Boolean) {
-                    XposedHelpers.setIntField(clonedAttribute, "valueCase_", 2);
-                } else if (override.overrideValue instanceof String) {
-                    XposedHelpers.setIntField(clonedAttribute, "valueCase_", 4);
-                } else if (override.overrideValue instanceof Long || override.overrideValue instanceof Integer) {
-                    XposedHelpers.setIntField(clonedAttribute, "valueCase_", 3);
-                }
-                XposedHelpers.setObjectField(clonedAttribute, "value_", override.overrideValue);
+                setAttributeValue(clonedAttribute, override.overrideValue);
                 result.put(override.key, clonedAttribute);
             }
 
